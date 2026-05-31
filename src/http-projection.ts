@@ -53,6 +53,7 @@ export const PAPERCUSP_CONTEXT_HEADERS = {
   run: 'x-papercusp-run',
   spawn: 'x-papercusp-spawn',
   parentSpawn: 'x-papercusp-parent-spawn',
+  client: 'x-papercusp-client',
 } as const;
 
 /** Headers and URL params an HTTP caller can supply. */
@@ -93,7 +94,8 @@ export function buildHttpSpawnContext(input: HttpRequestContextInput): {
               : k === 'chunk' ? 'chunk'
                 : k === 'run' ? 'run'
                   : k === 'spawn' ? 'spawn'
-                    : 'parent_spawn',
+                    : k === 'client' ? 'client'
+                      : 'parent_spawn',
     );
     return queryVal && queryVal.trim() ? queryVal.trim() : null;
   };
@@ -106,14 +108,19 @@ export function buildHttpSpawnContext(input: HttpRequestContextInput): {
   const runId = get('run'); if (runId) out.runId = runId;
   const spawnId = get('spawn'); if (spawnId) out.spawnId = spawnId;
   out.parentSpawnId = get('parentSpawn');
-  // `?client=` carries the stable per-session uiClientId that the
-  // coordination layer uses for ownership attribution (locks, plan
-  // edits, agent_chats). Parity with the MCP URL transport's
-  // parseRequestContext — without this the HTTP transport reaches
-  // resolveAgentIdentity with uiClientId=null, which throws for
-  // superuser / power-user callers.
-  const client = input.searchParams.get('client');
-  if (client && client.trim()) out.uiClientId = client.trim();
+  // The per-session uiClientId the coordination layer uses for ownership
+  // attribution (locks, plan edits, agent_chats). Header-first, query
+  // second — same precedence as every other context field above. Most
+  // clients carry it as `?client=` in the MCP url (Claude env-expands
+  // `${PAPERCUSP_SID}`; Codex bakes `&client=<sid>` per launch). OMP
+  // can't interpolate its mcp.json url, but it DOES resolve header
+  // values (env / `!cmd`) at connect time, so the `x-papercusp-client`
+  // header carries the per-launch SID and — being header-first —
+  // overrides OMP's static `?client=<machine-id>`. Without any source
+  // the HTTP transport reaches resolveAgentIdentity with uiClientId=null,
+  // which throws for superuser / power-user callers.
+  const client = get('client');
+  if (client) out.uiClientId = client;
   return out;
 }
 
