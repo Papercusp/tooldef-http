@@ -10,11 +10,13 @@ import {
   registerProjectedTool,
   _resetProjectionRegistryForTests,
   type ProjectedTool,
+  type UnifiedToolContext,
 } from '@papercusp/tooldef';
 import {
   handleHttpToolRequest,
   type HttpToolRequest,
   type HttpToolHostExtras,
+  type ToolScope,
 } from './http-projection';
 
 const makeTool = (over: Partial<ProjectedTool> = {}): ProjectedTool => ({
@@ -57,5 +59,67 @@ describe('handleHttpToolRequest (standalone — no host policies)', () => {
     registerProjectedTool(makeTool());
     const res = await handleHttpToolRequest(REQ({ method: 'DELETE' }), EXTRAS());
     expect(res.status).toBe(405);
+  });
+});
+
+describe('runScoped scoping seam (P-062 Phase 3)', () => {
+  // A tool that records the ctx.tx it was dispatched with, so we can assert
+  // which DB handle the seam routed to the handler.
+  const txRecorderTool = (sink: { tx?: unknown }): ProjectedTool =>
+    makeTool({
+      fn: async (_input, ctx) => {
+        sink.tx = (ctx as { tx?: unknown }).tx;
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    });
+
+  it('runs dispatch inside runScoped, and the tx it yields becomes ctx.tx', async () => {
+    const SENTINEL = { marker: 'scoped-tx' } as unknown;
+    const sink: { tx?: unknown } = {};
+    registerProjectedTool(txRecorderTool(sink));
+    let scopedCalled = false;
+    const res = await handleHttpToolRequest(
+      REQ(),
+      EXTRAS({
+        runScoped: async (_scope, run) => {
+          scopedCalled = true;
+          return run(SENTINEL as UnifiedToolContext['tx']);
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(scopedCalled).toBe(true);
+    expect(sink.tx).toBe(SENTINEL);
+  });
+
+  it('falls back to the static resolvePrincipalAndTx tx when runScoped is absent', async () => {
+    const STATIC = { marker: 'static-tx' } as unknown;
+    const sink: { tx?: unknown } = {};
+    registerProjectedTool(txRecorderTool(sink));
+    const res = await handleHttpToolRequest(
+      REQ({ headers: { authorization: 'Bearer x' } }),
+      EXTRAS({
+        resolvePrincipalAndTx: async () => ({
+          principal: { slug: 's', workspaceId: 'w', capabilities: new Set<string>() },
+          tx: STATIC as UnifiedToolContext['tx'],
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(sink.tx).toBe(STATIC);
+  });
+
+  it('passes the resolved scope (tool, workspaceId, isSuperuser) to runScoped', async () => {
+    let scope: ToolScope | undefined;
+    registerProjectedTool(makeTool());
+    await handleHttpToolRequest(
+      REQ({ searchParams: new URLSearchParams('workspace=ws-42') }),
+      EXTRAS({
+        runScoped: async (s, run) => { scope = s; return run(undefined); },
+      }),
+    );
+    expect(scope?.workspaceId).toBe('ws-42');
+    expect(scope?.tool.expose.mcp?.name).toBe('fix.tool');
+    expect(scope?.isSuperuser).toBe(false);
   });
 });

@@ -21,4 +21,5 @@ export {
   type HttpToolResponse,
   type HttpToolResult,
   type HttpToolHostExtras,
+  type ToolScope,
 } from './http-projection';

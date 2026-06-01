@@ -153,14 +153,41 @@ export type HttpToolResult =
  * `progress` callback (no-op for non-streaming HTTP, SSE writer for
  * streaming).
  */
+/**
+ * The scope the host needs to pick a DB handle for one tool dispatch
+ * (P-062 Phase 3). Passed to `HttpToolHostExtras.runScoped` so the host —
+ * not this adapter — owns the admin-vs-workspace-scoped policy.
+ */
+export interface ToolScope {
+  /** The resolved tool — the host may read a per-tool cross-workspace opt-out off it. */
+  tool: ProjectedTool;
+  /** Resolved auth principal, if any (bearer / device JWT). */
+  principal: UnifiedToolContext['principal'];
+  /** Spawn workspace id. `'*'` or undefined for superuser / unscoped calls. */
+  workspaceId: string | undefined;
+  /** True when admitted via `?superuser=1` — host should NOT workspace-scope these. */
+  isSuperuser: boolean;
+}
+
 export interface HttpToolHostExtras {
   /** Resolves a bearer token to a principal + tx; null on auth failure. */
   resolvePrincipalAndTx?(bearer: string): Promise<{
     principal: NonNullable<UnifiedToolContext['principal']>;
     tx: UnifiedToolContext['tx'];
   } | null>;
-  /** Wraps a fn in a workspace-bound transaction. v1: optional. */
-  withWorkspace?<T>(workspaceId: string, fn: (tx: UnifiedToolContext['tx']) => Promise<T>): Promise<T>;
+  /**
+   * Scoping seam (P-062 Phase 3). When present, the adapter runs the tool's
+   * dispatch INSIDE this callback so the HOST — not this adapter — picks the
+   * DB handle the tool sees as `ctx.tx`: a workspace-bound (RLS-subject)
+   * handle for normal calls, or the admin (rolbypassrls) handle for superuser
+   * calls and tools that declare themselves cross-workspace. The adapter
+   * overrides `ctx.tx` with whatever `run` is given and stays policy-free.
+   * When ABSENT, the adapter uses the static `ctx.tx` from
+   * resolvePrincipalAndTx (legacy path). A host whose impl is
+   * `runScoped: (_s, run) => run(adminTx)` is behavior-identical to the
+   * pre-seam path — neutral by construction until the host opts to scope.
+   */
+  runScoped?<T>(scope: ToolScope, run: (tx: UnifiedToolContext['tx']) => Promise<T>): Promise<T>;
   /** Quota + invocation persistence. */
   deps: DispatchProjectedDeps;
   /** Per-tool logger; receives line + plugin/tool/ctx for routing. */
@@ -349,6 +376,34 @@ function statusForErrorCode(code: string | undefined): number {
   );
 }
 
+/**
+ * Dispatch the resolved tool, honoring the host's optional `runScoped`
+ * scoping seam (P-062 Phase 3). With `runScoped`, the host chooses the DB
+ * handle and the dispatch runs inside its callback (that handle becomes
+ * `ctx.tx`); without it, the static `ctx.tx` from resolvePrincipalAndTx is
+ * used. Behavior is identical when the host's runScoped yields that same
+ * handle. Shared by the JSON + SSE handlers so the seam wraps both.
+ */
+function dispatchScoped(
+  req: HttpToolRequest,
+  extras: HttpToolHostExtras,
+  resolved: { tool: ProjectedTool; ctx: UnifiedToolContext },
+): Promise<DispatchProjectedResult> {
+  const toolName = resolved.tool.expose.mcp?.name ?? req.pathname;
+  const run = (tx: UnifiedToolContext['tx']): Promise<DispatchProjectedResult> => {
+    resolved.ctx.tx = tx;
+    return dispatchProjectedTool(resolved.tool, toolName, req.body, resolved.ctx, extras.deps);
+  };
+  if (!extras.runScoped) return run(resolved.ctx.tx);
+  const scope: ToolScope = {
+    tool: resolved.tool,
+    principal: resolved.ctx.principal,
+    workspaceId: resolved.ctx.workspaceId,
+    isSuperuser: !!resolved.ctx.isSuperuser,
+  };
+  return extras.runScoped(scope, run);
+}
+
 export async function handleHttpToolRequest(
   req: HttpToolRequest,
   extras: HttpToolHostExtras,
@@ -356,13 +411,7 @@ export async function handleHttpToolRequest(
   const resolved = await resolveToolAndContext(req, extras);
   if (!resolved.ok) return { status: resolved.status, body: resolved.body };
 
-  const r: DispatchProjectedResult = await dispatchProjectedTool(
-    resolved.tool,
-    resolved.tool.expose.mcp?.name ?? req.pathname,
-    req.body,
-    resolved.ctx,
-    extras.deps,
-  );
+  const r: DispatchProjectedResult = await dispatchScoped(req, extras, resolved);
 
   if (!r.ok) {
     return { status: statusForErrorCode(r.error?.code), body: { error: r.error! } };
@@ -460,13 +509,7 @@ export async function handleHttpToolRequestStreaming(
     });
   };
 
-  const r = await dispatchProjectedTool(
-    resolved.tool,
-    resolved.tool.expose.mcp?.name ?? req.pathname,
-    req.body,
-    resolved.ctx,
-    extras.deps,
-  );
+  const r = await dispatchScoped(req, extras, resolved);
   if (!r.ok) {
     // Dispatch failure: auto-error. Honor the tool's schema-inferred
     // wire kind for `error` — if the tool declared `error: z.string()`,
