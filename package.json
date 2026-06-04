@@ -1,5 +1,6 @@
 {
   "name": "@papercusp/tooldef-http",
+  "type": "module",
   "version": "0.1.0",
   "private": true,
   "description": "HTTP transport adapter for @papercusp/tooldef — resolve an inbound request to a projected tool, build the context from headers/query (host-injected principal + harness-path resolution), and dispatch. Framework-neutral; Next.js/Hono/Express are thin shims on top.",
