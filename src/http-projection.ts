@@ -363,17 +363,26 @@ async function resolveToolAndContext(
 }
 
 function statusForErrorCode(code: string | undefined): number {
-  return (
-    code === 'unauthorized' ? 401
-      : code === 'role_not_allowed' ? 403
-        : code === 'missing_capability' ? 403
-          : code === 'quota_exceeded' ? 429
-            : code === 'invalid_input' ? 400
-              : code === 'timeout' ? 504
-                : code === 'unknown_tool' ? 404
-                  : code === 'method_not_allowed' ? 405
-                    : 500
-  );
+  switch (code) {
+    case 'unauthorized': return 401;
+    case 'role_not_allowed': return 403;
+    case 'missing_capability': return 403;
+    // RBAC role requirement (tooldef-auth Phase 2) — was falling through to 500.
+    case 'missing_role': return 403;
+    // Resource-authorize denial / default-deny (Phases 1b/3) — were 500.
+    case 'authorization_denied': return 403;
+    case 'ungated': return 403;
+    // harness:'required' tool with no harness in scope — was 500.
+    case 'harness_required': return 400;
+    // Declarative `requires:` precondition (D-006) — Precondition Failed.
+    case 'precondition_failed': return 412;
+    case 'quota_exceeded': return 429;
+    case 'invalid_input': return 400;
+    case 'timeout': return 504;
+    case 'unknown_tool': return 404;
+    case 'method_not_allowed': return 405;
+    default: return 500;
+  }
 }
 
 /**
