@@ -338,6 +338,10 @@ async function resolveToolAndContext(
     },
     emit: noopEmit,
     transport: 'http',
+    // Result-format negotiation (P-008): explicit `?format=` wins over the
+    // `Accept` MIME type. Parsed by the result serializer; unrecognized values
+    // fall through to the HTTP transport default (lossless JSON).
+    requestedFormat: req.searchParams.get('format') ?? req.headers['accept'] ?? undefined,
     ...spawnCtx,
     isSuperuser,
     // Neutral gate-bypass signal the dispatcher reads (P-014). An admitted
@@ -425,7 +429,12 @@ export async function handleHttpToolRequest(
   if (!r.ok) {
     return { status: statusForErrorCode(r.error?.code), body: { error: r.error! } };
   }
-  return { status: 200, body: { content: r.result?.content ?? [] } };
+  // Forward the result `_meta` (format tag + pagination/degraded envelope, P-006)
+  // alongside content so HTTP consumers can read the negotiated format + cursor.
+  const meta = r.result?._meta;
+  const body: Record<string, unknown> = { content: r.result?.content ?? [] };
+  if (meta && Object.keys(meta).length > 0) body._meta = meta;
+  return { status: 200, body };
 }
 
 /* ─── Streaming variant (SSE) ────────────────────────────────────────── */
