@@ -342,6 +342,7 @@ async function resolveToolAndContext(
     // `Accept` MIME type. Parsed by the result serializer; unrecognized values
     // fall through to the HTTP transport default (lossless JSON).
     requestedFormat: req.searchParams.get('format') ?? req.headers['accept'] ?? undefined,
+    requestedStructured: req.searchParams.get('structured') === '1',
     ...spawnCtx,
     isSuperuser,
     // Neutral gate-bypass signal the dispatcher reads (P-014). An admitted
@@ -434,6 +435,7 @@ export async function handleHttpToolRequest(
   const meta = r.result?._meta;
   const body: Record<string, unknown> = { content: r.result?.content ?? [] };
   if (meta && Object.keys(meta).length > 0) body._meta = meta;
+  if (r.result?.structuredContent !== undefined) body.structuredContent = r.result.structuredContent;
   return { status: 200, body };
 }
 
