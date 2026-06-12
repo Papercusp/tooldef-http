@@ -273,6 +273,17 @@ async function resolveToolAndContext(
     if (!spawnCtx.workspaceId) spawnCtx.workspaceId = '*';
     if (!spawnCtx.harnessSlug) spawnCtx.harnessSlug = '*';
     if (!spawnCtx.role) spawnCtx.role = 'operator' as AgentRole;
+    // An admitted superuser who sent no `?client=` / x-papercusp-client still
+    // needs a stable coordination identity: identity resolvers treat a
+    // superuser ctx with no uiClientId as unattributable and THROW, so every
+    // client-less call to an identity-resolving tool over this transport
+    // failed deterministically (EI-334 — the advertised curl-able
+    // `fleet/spawn?superuser=1` admin trigger was structurally broken).
+    // Admission already proved "the machine admin" (host validator: loopback
+    // + the on-disk bearer), so a fixed transport-level id is attributable —
+    // the same stability class as a `?client=` machine UUID. An explicit
+    // client id, when provided, still wins (checked above).
+    if (!spawnCtx.uiClientId) spawnCtx.uiClientId = 'su-http-loopback';
     // Per-request UUID rather than a shared 'standalone' sentinel.
     // Audit5: when claude-code spawned via mcp-remote calls multiple
     // tools concurrently from one subprocess, the URL is static — so
