@@ -13,7 +13,7 @@
       "default": "./src/index.ts"
     }
   },
-  "dependencies": {
+  "peerDependencies": {
     "@papercusp/tooldef": "*",
     "@papercusp/sse": "*"
   },
