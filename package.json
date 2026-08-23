@@ -20,5 +20,8 @@
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@papercusp/test-config": "*"
   }
 }
