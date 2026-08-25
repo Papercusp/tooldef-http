@@ -67,6 +67,7 @@ describe('runScoped scoping seam (P-062 Phase 3)', () => {
   // which DB handle the seam routed to the handler.
   const txRecorderTool = (sink: { tx?: unknown }): ProjectedTool =>
     makeTool({
+      needsWorkspaceTx: true,
       fn: async (_input, ctx) => {
         sink.tx = (ctx as { tx?: unknown }).tx;
         return { content: [{ type: 'text', text: 'ok' }] };
