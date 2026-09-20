@@ -49,3 +49,14 @@ coverage/
 coverage-*/
 **/coverage/
 **/coverage-*/
+
+# The package exports source TypeScript directly. Build output is a local convenience for
+# standalone consumers and is intentionally not repository state; tracking it creates a second,
+# silently stale copy of the source (EI-22733941811175533).
+#
+# This rule was applied to the sibling libs/generic/tooldef and MISSED here, so 6 files under
+# dist/ stayed tracked and went 3 weeks stale (WI-10002064). The superproject block that looks
+# like it covers this package (`packages/tooldef-http/dist/`) is doubly inert: that path no
+# longer exists, and a superproject rule cannot reach inside a submodule anyway — same reach
+# gap as the coverage/ block above.
+dist/
