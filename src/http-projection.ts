@@ -109,17 +109,25 @@ export function buildHttpSpawnContext(input: HttpRequestContextInput): {
   const spawnId = get('spawn'); if (spawnId) out.spawnId = spawnId;
   out.parentSpawnId = get('parentSpawn');
   // The per-session uiClientId the coordination layer uses for ownership
-  // attribution (locks, plan edits, agent_chats). Header-first, query
-  // second — same precedence as every other context field above. Most
+  // attribution (locks, plan edits, agent_chats). OMP's explicit client header
+  // wins first; for an admitted superuser MCP request, Mcp-Session-Id is the
+  // per-session identity before the URL's static client fallback. Only trust
+  // that handshake id on the superuser route: other tiers must use their
+  // authenticated client identity, not the transport session id. Most
   // clients carry it as `?client=` in the MCP url (Claude env-expands
   // `${PAPERCUSP_SID}`; Codex bakes `&client=<sid>` per launch). OMP
   // can't interpolate its mcp.json url, but it DOES resolve header
   // values (env / `!cmd`) at connect time, so the `x-papercusp-client`
-  // header carries the per-launch SID and — being header-first —
-  // overrides OMP's static `?client=<machine-id>`. Without any source
+  // header carries the per-launch SID and overrides OMP's static
+  // `?client=<machine-id>`. Without any source
   // the HTTP transport reaches resolveAgentIdentity with uiClientId=null,
   // which throws for superuser / power-user callers.
-  const client = get('client');
+  const clientHeader = input.headers[PAPERCUSP_CONTEXT_HEADERS.client]?.trim() || null;
+  const clientQuery = input.searchParams.get('client')?.trim() || null;
+  const mcpSessionId = input.searchParams.get('superuser') === '1'
+    ? input.headers['mcp-session-id']?.trim() || null
+    : null;
+  const client = clientHeader ?? mcpSessionId ?? clientQuery;
   if (client) out.uiClientId = client;
   return out;
 }
